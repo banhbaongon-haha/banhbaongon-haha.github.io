@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trò Chơi Bắn Súng</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        
+        :root {
+            --bg-color: #1a1a2e;
+            --text-color: #e0e0e0;
+            --primary-color: #0f3460;
+            --secondary-color: #16213e;
+            --accent-color: #e94560;
+            --info-color: #c0c0c0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            touch-action: none; /* Prevents mobile scrolling */
+        }
+
+        #game-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background-color: var(--secondary-color);
+            border-radius: 0; /* No rounded corners for full screen */
+            box-shadow: none; /* No shadow for full screen */
+            border: none; /* No border for full screen */
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0;
+        }
+
+        canvas {
+            width: 100% !important;
+            height: 100% !important;
+            border-radius: 0;
+            background-color: black;
+            display: block;
+        }
+
+        #game-info {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+        }
+
+        .message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 1.5rem 2.5rem;
+            background-color: rgba(0, 0, 0, 0.8);
+            border: 2px solid var(--accent-color);
+            border-radius: 1rem;
+            text-align: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+            display: none;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .message-box h2 {
+            margin: 0;
+            font-size: 2rem;
+            color: var(--accent-color);
+        }
+
+        .instructions {
+            position: absolute;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            max-width: 80%;
+            font-size: 0.9rem;
+            color: var(--info-color);
+        }
+
+        .button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, background-color 0.2s;
+            box-shadow: 0 0 10px var(--accent-color);
+        }
+
+        .button:hover {
+            background-color: #c9344f;
+            transform: scale(1.05);
+        }
+        
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 15px;
+            height: 15px;
+            border: 2px solid white;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-sizing: border-box;
+            pointer-events: none; /* Allows clicks to pass through */
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="crosshair"></div>
+        <div id="game-info">
+            Điểm: <span id="score">0</span>
+            <br>
+            Thời gian: <span id="time">60</span>s
+        </div>
+        <div id="message-box" class="message-box">
+            <h2 id="message-text"></h2>
+            <button id="restart-button" class="button">Chơi lại</button>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+        <div class="instructions">
+            Nhấp chuột để bắt đầu và điều khiển. Nhấn ESC để thoát.
+            <br>
+            Sử dụng WASD hoặc phím mũi tên để di chuyển.
+        </div>
+    </div>
+
+    <script>
+        // --- CÀI ĐẶT BAN ĐẦU ---
+        let scene, camera, renderer, raycaster;
+        let targets = [];
+        let score = 0;
+        let gameTime = 60; // 60 seconds
+        let isGameOver = false;
+        let gameLoopInterval;
+        let isPointerLocked = false;
+
+        const canvas = document.getElementById('gameCanvas');
+        const gameContainer = document.getElementById('game-container');
+        const scoreElement = document.getElementById('score');
+        const timeElement = document.getElementById('time');
+        const messageBox = document.getElementById('message-box');
+        const messageText = document.getElementById('message-text');
+        const restartButton = document.getElementById('restart-button');
+        const crosshair = document.getElementById('crosshair');
+        
+        const keys = {
+            w: false, s: false, a: false, d: false,
+            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false
+        };
+
+        // --- CÁC HÀM TRÒ CHƠI ---
+        function init() {
+            // Khởi tạo Scene, Camera và Renderer
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+            
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 0;
+            camera.position.y = 1.6; // Human height
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // Ánh sáng
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 5, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+            
+            // Ground
+            const groundGeometry = new THREE.PlaneGeometry(200, 200);
+            const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.8, metalness: 0.1 });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Khởi tạo Raycaster
+            raycaster = new THREE.Raycaster();
+
+            // Bắt đầu trò chơi
+            resetGame();
+        }
+
+        function createTarget() {
+            const geometry = new THREE.BoxGeometry(2, 2, 2);
+            const material = new THREE.MeshStandardMaterial({ color: 0xffa500 });
+            const target = new THREE.Mesh(geometry, material);
+            
+            // Đặt vị trí ngẫu nhiên cho mục tiêu
+            target.position.x = (Math.random() - 0.5) * 100;
+            target.position.y = Math.random() * 5 + 1;
+            target.position.z = -Math.random() * 150 - 20; // Đặt mục tiêu xa hơn
+            target.castShadow = true;
+            
+            // Thêm vận tốc ngẫu nhiên cho mục tiêu
+            target.velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.2,
+                (Math.random() - 0.5) * 0.2,
+                (Math.random() - 0.5) * 0.2
+            );
+
+            targets.push(target);
+            scene.add(target);
+        }
+
+        function resetGame() {
+            // Đặt lại trạng thái trò chơi
+            isGameOver = false;
+            score = 0;
+            gameTime = 60;
+            scoreElement.textContent = score;
+            timeElement.textContent = gameTime;
+            messageBox.style.display = 'none';
+
+            // Xóa tất cả mục tiêu cũ
+            targets.forEach(t => scene.remove(t));
+            targets = [];
+
+            // Reset camera position
+            camera.position.set(0, 1.6, 0);
+            camera.rotation.set(0, 0, 0);
+
+            // Tạo mục tiêu mới
+            for (let i = 0; i < 15; i++) {
+                createTarget();
+            }
+
+            // Bắt đầu vòng lặp thời gian
+            clearInterval(gameLoopInterval);
+            gameLoopInterval = setInterval(() => {
+                if (isGameOver) return;
+                gameTime--;
+                timeElement.textContent = gameTime;
+                if (gameTime <= 0) {
+                    endGame("Hết giờ! Điểm cuối cùng của bạn: " + score);
+                }
+            }, 1000);
+        }
+
+        function endGame(message) {
+            isGameOver = true;
+            clearInterval(gameLoopInterval);
+            messageText.textContent = message;
+            messageBox.style.display = 'flex';
+        }
+
+        function animate() {
+            if (isGameOver) return;
+            requestAnimationFrame(animate);
+
+            // Cập nhật vị trí và xoay của các mục tiêu
+            targets.forEach(t => {
+                t.position.add(t.velocity);
+                if (t.position.x > 50 || t.position.x < -50) t.velocity.x *= -1;
+                if (t.position.y > 15 || t.position.y < 1) t.velocity.y *= -1;
+                if (t.position.z > -10 || t.position.z < -170) t.velocity.z *= -1;
+                t.rotation.x += 0.01;
+                t.rotation.y += 0.01;
+            });
+            
+            // Cập nhật vị trí camera dựa trên phím bấm
+            const moveSpeed = 0.3;
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            direction.y = 0; // Prevent vertical movement
+            direction.normalize();
+
+            if (keys.w || keys.ArrowUp) {
+                camera.position.add(direction.multiplyScalar(moveSpeed));
+            }
+            if (keys.s || keys.ArrowDown) {
+                camera.position.sub(direction.multiplyScalar(moveSpeed));
+            }
+            
+            const sideDirection = new THREE.Vector3();
+            sideDirection.crossVectors(direction, camera.up);
+            if (keys.a || keys.ArrowLeft) {
+                camera.position.sub(sideDirection.multiplyScalar(moveSpeed));
+            }
+            if (keys.d || keys.ArrowRight) {
+                camera.position.add(sideDirection.multiplyScalar(moveSpeed));
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- XỬ LÝ SỰ KIỆN ---
+        // Xử lý sự kiện nhấp chuột
+        window.addEventListener('click', () => {
+            if (isGameOver) return;
+            
+            // Yêu cầu khóa con trỏ khi click để bắt đầu trò chơi
+            if (!isPointerLocked) {
+                gameContainer.requestPointerLock();
+                return;
+            }
+
+            // Bắn từ camera
+            raycaster.setFromCamera({x: 0, y: 0}, camera);
+            const intersects = raycaster.intersectObjects(targets);
+
+            if (intersects.length > 0) {
+                const hitTarget = intersects[0].object;
+                score += 10;
+                scoreElement.textContent = score;
+                scene.remove(hitTarget);
+                
+                const index = targets.indexOf(hitTarget);
+                if (index > -1) {
+                    targets.splice(index, 1);
+                }
+
+                if (targets.length < 5) {
+                    createTarget();
+                }
+            }
+        });
+
+        // Xử lý sự kiện di chuyển chuột để xoay camera
+        const rotationSpeed = 0.002; // Điều chỉnh tốc độ xoay camera
+        document.addEventListener('mousemove', (e) => {
+            if (!isPointerLocked) return;
+            
+            const deltaX = e.movementX;
+            const deltaY = e.movementY;
+
+            camera.rotation.y -= deltaX * rotationSpeed;
+            camera.rotation.x -= deltaY * rotationSpeed;
+            
+            // Giới hạn góc nhìn dọc để không bị lộn ngược
+            const maxPitch = Math.PI / 2 - 0.1;
+            camera.rotation.x = Math.max(-maxPitch, Math.min(maxPitch, camera.rotation.x));
+        });
+
+        // Xử lý sự kiện Pointer Lock
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement === gameContainer) {
+                isPointerLocked = true;
+                gameContainer.style.cursor = 'none'; // Ẩn con trỏ
+            } else {
+                isPointerLocked = false;
+                gameContainer.style.cursor = 'default'; // Hiện con trỏ
+            }
+        });
+        
+        // Xử lý sự kiện bàn phím
+        document.addEventListener('keydown', (event) => {
+            if (keys.hasOwnProperty(event.key)) {
+                keys[event.key] = true;
+            }
+        });
+        document.addEventListener('keyup', (event) => {
+            if (keys.hasOwnProperty(event.key)) {
+                keys[event.key] = false;
+            }
+        });
+
+        // Xử lý sự kiện trên nút "Chơi lại"
+        restartButton.addEventListener('click', () => {
+            resetGame();
+            animate();
+        });
+
+        // Xử lý sự kiện thay đổi kích thước cửa sổ
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Bắt đầu trò chơi khi tải trang
+        window.onload = function() {
+            init();
+            animate();
+        };
+    </script>
+</body>
+</html>
